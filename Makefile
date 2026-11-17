@@ -69,8 +69,13 @@ NEFARIOUS_MARKERS := \
 	and not deprecated \
 	and not strict \
 	$(EXTRA_MARKERS)
+# testChathistoryTagmsg: Nefarious replays stored TAGMSGs (reactions, replies)
+# in CHATHISTORY even without draft/event-playback, a deliberate divergence.
+# testRedactDirectMessage: Nefarious does not support redacting private
+# messages and refuses with FAIL REDACT INVALID_TARGET, which the spec allows.
 NEFARIOUS_SELECTORS := \
-	(foo or not foo) \
+	not testChathistoryTagmsg \
+	and not testRedactDirectMessage \
 	$(EXTRA_SELECTORS)
 
 SNIRCD_MARKERS := \
