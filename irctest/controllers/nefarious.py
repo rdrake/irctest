@@ -105,6 +105,7 @@ features {{
     "SSL_KEYFILE" = "{ssl_pem}";
     {ssl_features}
     {services_features}
+    {bouncer_features}
 }};
 """
 
@@ -160,6 +161,16 @@ TEMPLATE_SERVICES_FEATURES = """\
     # advertises sasl only when a default list is configured.
     "SASL_DEFAULT_MECHANISMS" = "{sasl_mechanisms}";
     "LOC_DEFAULT_SERVICE" = "{nickserv}";
+"""
+
+TEMPLATE_BOUNCER_FEATURES = """\
+    # Every login gets a session; later logins to the account attach to it.
+    "BOUNCER_ENABLE" = "TRUE";
+    "BOUNCER_AUTO_RESUME" = "TRUE";
+    "BOUNCER_DEFAULT_HOLD" = "TRUE";
+    "BOUNCER_REQUIRE_TLS" = "FALSE";
+    "BOUNCER_MAX_ALIASES" = "8";
+    "CAP_draft_bouncer" = "TRUE";
 """
 
 
@@ -253,6 +264,10 @@ class NefariousController(BaseServerController, DirectoryBasedController):
                 hostname=websocket_hostname, websocket_port=websocket_port
             )
 
+        bouncer_features = ""
+        if self.test_config.bouncer:
+            bouncer_features = TEMPLATE_BOUNCER_FEATURES
+
         services_config = ""
         services_features = ""
         services_port = None
@@ -291,6 +306,7 @@ class NefariousController(BaseServerController, DirectoryBasedController):
                     ssl_features=ssl_features,
                     services_config=services_config,
                     services_features=services_features,
+                    bouncer_features=bouncer_features,
                     chathistory_db=self.directory / "history",
                 )
             )

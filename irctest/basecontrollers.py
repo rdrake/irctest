@@ -64,6 +64,11 @@ class TestCaseControllerConfig:
     """Whether an email address must be provided when using draft/account-registration.
     This does not imply servers must validate it."""
 
+    bouncer: bool = False
+    """Whether several connections logged into one account share one user
+    (a bouncer, Ergo's "multiclient"). Servers where this is always on can
+    ignore it."""
+
     ergo_roleplay: bool = False
     """Whether to enable the Ergo role-play commands."""
 

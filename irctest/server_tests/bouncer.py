@@ -5,13 +5,16 @@
 """
 
 from irctest import cases
-from irctest.irc_utils.sasl import sasl_plain_blob
 from irctest.numerics import ERR_NICKNAMEINUSE, RPL_WELCOME
 from irctest.patma import ANYSTR, StrRe
 
 
 @cases.mark_services
 class BouncerTestCase(cases.BaseServerTestCase):
+    @staticmethod
+    def config() -> cases.TestCaseControllerConfig:
+        return cases.TestCaseControllerConfig(bouncer=True)
+
     def setUp(self):
         super().setUp()
         self.controller.registerUser(self, "observer", "observerpassword")
@@ -24,31 +27,30 @@ class BouncerTestCase(cases.BaseServerTestCase):
         self.sendLine(1, "CAP REQ :message-tags server-time")
         self.getMessages(1)
 
-        self.addClient()
-        self.sendLine(2, "CAP LS 302")
-        self.sendLine(2, "AUTHENTICATE PLAIN")
-        self.sendLine(2, sasl_plain_blob("testuser", "mypassword"))
-        self.sendLine(2, "NICK testnick")
-        self.sendLine(2, "USER a 0 * a")
-        self.sendLine(2, "CAP REQ :server-time message-tags")
-        self.sendLine(2, "CAP END")
-        messages = self.getMessages(2)
+        messages = self._connectSession(2, ["server-time", "message-tags"])
         welcomes = [message for message in messages if message.command == RPL_WELCOME]
         self.assertEqual(len(welcomes), 1)
         # should see a regburst for testnick
         self.assertMessageMatch(welcomes[0], params=["testnick", ANYSTR])
         self.joinChannel(2, "#chan")
 
+    def _connectSession(self, client, capabilities):
+        """Connects another client logged into testuser's account, with nick
+        testnick, and returns what it got after CAP END."""
+        self.addClient(client)
+        self.sendLine(client, "CAP LS 302")
+        self.getCapLs(client)
+        self.requestCapabilities(client, ["sasl", *capabilities])
+        self.authenticateClient(client, "testuser", "mypassword")
+        self.sendLine(client, "NICK testnick")
+        self.sendLine(client, "USER a 0 * a")
+        self.sendLine(client, "CAP END")
+        return self.getMessages(client)
+
     def _connectClient3(self):
-        self.addClient()
-        self.sendLine(3, "CAP LS 302")
-        self.sendLine(3, "AUTHENTICATE PLAIN")
-        self.sendLine(3, sasl_plain_blob("testuser", "mypassword"))
-        self.sendLine(3, "NICK testnick")
-        self.sendLine(3, "USER a 0 * a")
-        self.sendLine(3, "CAP REQ :server-time message-tags account-tag")
-        self.sendLine(3, "CAP END")
-        messages = self.getMessages(3)
+        messages = self._connectSession(
+            3, ["server-time", "message-tags", "account-tag"]
+        )
         welcomes = [message for message in messages if message.command == RPL_WELCOME]
         self.assertEqual(len(welcomes), 1)
         # should see the *same* regburst for testnick
@@ -60,15 +62,7 @@ class BouncerTestCase(cases.BaseServerTestCase):
     def _connectClient4(self):
         # connect a client similar to 3, but without the message-tags and account-tag
         # capabilities, to make sure it does not receive the associated tags
-        self.addClient()
-        self.sendLine(4, "CAP LS 302")
-        self.sendLine(4, "AUTHENTICATE PLAIN")
-        self.sendLine(4, sasl_plain_blob("testuser", "mypassword"))
-        self.sendLine(4, "NICK testnick")
-        self.sendLine(4, "USER a 0 * a")
-        self.sendLine(4, "CAP REQ server-time")
-        self.sendLine(4, "CAP END")
-        messages = self.getMessages(4)
+        messages = self._connectSession(4, ["server-time"])
         welcomes = [message for message in messages if message.command == RPL_WELCOME]
         self.assertEqual(len(welcomes), 1)
 
@@ -232,16 +226,8 @@ class BouncerTestCase(cases.BaseServerTestCase):
         self.sendLine(2, "NS SET MULTICLIENT OFF")
         self.getMessages(2)
 
-        self.addClient()
-        self.sendLine(3, "CAP LS 302")
-        self.sendLine(3, "AUTHENTICATE PLAIN")
-        self.sendLine(3, sasl_plain_blob("testuser", "mypassword"))
-        self.sendLine(3, "NICK testnick")
-        self.sendLine(3, "USER a 0 * a")
-        self.sendLine(3, "CAP REQ :server-time message-tags")
-        self.sendLine(3, "CAP END")
+        messages = self._connectSession(3, ["server-time", "message-tags"])
         # with multiclient disabled, we should not be able to attach to the nick
-        messages = self.getMessages(3)
         welcomes = [message for message in messages if message.command == RPL_WELCOME]
         self.assertEqual(len(welcomes), 0)
         errors = [
