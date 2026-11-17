@@ -1,8 +1,12 @@
-"""irctest controller for Nefarious IRCd (evilnet/nefarious2 fork).
+"""irctest controller for Nefarious IRCd (evilnet/nefarious2, ircv3.2-upgrade).
 
-Nefarious is an ircu-derivative with extensive IRCv3 extensions.
-This controller replaces the upstream stub that inherits from Ircu2Controller
-with zero customization, so that irctest actually exercises the IRCv3 features.
+Nefarious is an ircu derivative with an extensive IRCv3 stack. This
+controller replaces upstream's stub (a bare Ircu2Controller subclass) so that
+irctest exercises those extensions.
+
+Services: Nefarious links to services over P10, so the services package has to
+speak P10 too. Run with ``--services-controller=irctest.controllers.x3_services``
+to get AuthServ (accounts, SASL) from X3.
 """
 
 import shutil
@@ -27,7 +31,7 @@ Port {{
     port = {port};
 }};
 
-{ssl_config}
+{extra_ports}
 
 Class {{
     name = "Client";
@@ -53,12 +57,20 @@ Operator {{
     class = "Client";
 }};
 
+{services_config}
+
 features {{
     "PPATH" = "{pidfile}";
     "HIS_SERVERNAME" = "My.Little.Server";
     "MSGID" = "TRUE";
     "HOST_HIDING" = "FALSE";
+    # Otherwise a login sets +x even with HOST_HIDING off, and the 396 that
+    # follows 903 is read as the reply to the client's next command.
+    "SASL_AUTOHIDEHOST" = "FALSE";
     "NOIDENT" = "TRUE";
+    # The default 30s NICKDELAY breaks tests that change nick quickly
+    # (e.g. MONITOR's testNickChange).
+    "NICKDELAY" = "0";
     "CONNEXIT_NOTICES" = "FALSE";
     "CAP_server_time" = "TRUE";
     "CAP_echo_message" = "TRUE";
@@ -79,20 +91,26 @@ features {{
     "CAP_draft_multiline" = "TRUE";
     "CAP_draft_message_redaction" = "TRUE";
     "CAP_draft_chathistory" = "TRUE";
+    "CAP_draft_event_playback" = "TRUE";
     "CAP_draft_read_marker" = "TRUE";
     "CAP_draft_channel_rename" = "TRUE";
     "CAP_draft_metadata_2" = "TRUE";
     "EXCEPTS" = "TRUE";
-    "NICKDELAY" = "0";
-    "CHATHISTORY_DB" = "TRUE";
+    # CHATHISTORY_DB is a path (default "history"), not a boolean. Keep the
+    # RocksDB store inside the per-test directory.
+    "CHATHISTORY_DB" = "{chathistory_db}";
     "CHATHISTORY_STORE" = "TRUE";
     "CHATHISTORY_PRIVATE" = "TRUE";
     "CHATHISTORY_REQUIRE_AUTH" = "FALSE";
+    "SSL_CERTFILE" = "{ssl_pem}";
+    "SSL_KEYFILE" = "{ssl_pem}";
     {ssl_features}
+    {services_features}
+    {bouncer_features}
 }};
 """
 
-TEMPLATE_SSL_CONFIG = """\
+TEMPLATE_SSL_PORT = """\
 Port {{
     vhost = "{hostname}";
     port = {ssl_port};
@@ -100,13 +118,7 @@ Port {{
 }};
 """
 
-TEMPLATE_SSL_FEATURES = """\
-    "SSL_CERTFILE" = "{ssl_pem}";
-    "SSL_KEYFILE" = "{ssl_pem}";
-    "CAP_tls" = "TRUE";
-"""
-
-TEMPLATE_WEBSOCKET_CONFIG = """\
+TEMPLATE_WEBSOCKET_PORT = """\
 Port {{
     vhost = "{hostname}";
     port = {websocket_port};
@@ -114,13 +126,68 @@ Port {{
 }};
 """
 
+TEMPLATE_SERVICES_CONFIG = """\
+Port {{
+    vhost = "{hostname}";
+    port = {services_port};
+    server = yes;
+}};
+
+Class {{
+    name = "Server";
+    pingfreq = 1 minutes;
+    connectfreq = 5 minutes;
+    maxlinks = 1;
+    sendq = 9000000;
+}};
+
+Connect {{
+    name = "My.Little.Services";
+    host = "{services_ip}";
+    password = "password";
+    port = {services_port};
+    class = "Server";
+    hub;
+    autoconnect = no;
+}};
+
+UWorld {{
+    name = "My.Little.Services";
+}};
+"""
+
+TEMPLATE_SERVICES_FEATURES = """\
+    "SASL_SERVER" = "My.Little.Services";
+    # X3 does not announce its mechanisms over P10 (SASL M), so Nefarious
+    # advertises sasl only when a default list is configured.
+    "SASL_DEFAULT_MECHANISMS" = "{sasl_mechanisms}";
+    "LOC_DEFAULT_SERVICE" = "{nickserv}";
+"""
+
+TEMPLATE_BOUNCER_FEATURES = """\
+    # Every login gets a session; later logins to the account attach to it.
+    "BOUNCER_ENABLE" = "TRUE";
+    "BOUNCER_AUTO_RESUME" = "TRUE";
+    "BOUNCER_DEFAULT_HOLD" = "TRUE";
+    "BOUNCER_REQUIRE_TLS" = "FALSE";
+    "BOUNCER_MAX_ALIASES" = "8";
+    "CAP_draft_bouncer" = "TRUE";
+"""
+
 
 class NefariousController(BaseServerController, DirectoryBasedController):
     software_name = "Nefarious"
     supports_sts = False
     extban_mute_char = None
+    # Overridden by the services controller's choice of AuthServ nick.
+    nickserv = "AuthServ"
+    # SASL is relayed to services over P10; X3 implements PLAIN (and
+    # EXTERNAL, which irctest does not test against servers).
+    supported_sasl_mechanisms = {"PLAIN"}
 
-    # All IRCv3 capabilities nefarious supports that are in the Capabilities enum
+    # The IRCv3 capabilities in irctest's Capabilities enum that Nefarious
+    # implements. Not listed: EXTENDED_MONITOR and STS (not implemented).
+    # draft/metadata-3 is not in the enum; Nefarious offers draft/metadata-2.
     capabilities = frozenset(
         {
             Capabilities.ACCOUNT_NOTIFY,
@@ -134,6 +201,7 @@ class NefariousController(BaseServerController, DirectoryBasedController):
             Capabilities.MESSAGE_TAGS,
             Capabilities.MULTILINE,
             Capabilities.MULTI_PREFIX,
+            Capabilities.READ_MARKER,
             Capabilities.SERVER_TIME,
             Capabilities.SETNAME,
         }
@@ -163,7 +231,7 @@ class NefariousController(BaseServerController, DirectoryBasedController):
         websocket_hostname: Optional[str],
         websocket_port: Optional[int],
     ) -> None:
-        if run_services:
+        if run_services and not hasattr(self, "services_controller_class"):
             raise NotImplementedByController("Services")
         assert self.proc is None
         self.port = port
@@ -174,29 +242,57 @@ class NefariousController(BaseServerController, DirectoryBasedController):
         assert self.directory
         pidfile = self.directory / "ircd.pid"
 
-        # SSL setup: nefarious expects a single PEM with key + cert concatenated
-        ssl_config = ""
+        # Nefarious loads SSL_CERTFILE at startup even without an SSL
+        # listener, and exits ("Failed to initialize SSL contexts") if it is
+        # missing, so the PEM (key + cert in one file) is always written.
+        self.gen_ssl()
+        ssl_pem = self.directory / "ircd.pem"
+        with open(ssl_pem, "w") as out:
+            out.write(self.key_path.read_text())
+            out.write(self.pem_path.read_text())
+
+        extra_ports = ""
         ssl_features = ""
         if ssl:
-            self.gen_ssl()
-            ssl_pem = self.directory / "ircd.pem"
-            # Concatenate key + cert into single PEM file
-            with open(ssl_pem, "w") as out:
-                out.write(self.key_path.read_text())
-                out.write(self.pem_path.read_text())
-            (ssl_hostname, ssl_port) = self.get_hostname_and_port()
-            ssl_config = TEMPLATE_SSL_CONFIG.format(
-                hostname=hostname,
-                ssl_port=ssl_port,
+            (_, ssl_port) = self.get_hostname_and_port()
+            extra_ports += TEMPLATE_SSL_PORT.format(
+                hostname=hostname, ssl_port=ssl_port
             )
-            ssl_features = TEMPLATE_SSL_FEATURES.format(ssl_pem=ssl_pem)
+            ssl_features = '"CAP_tls" = "TRUE";'
 
-        # WebSocket listener
-        websocket_config = ""
         if websocket_hostname is not None and websocket_port is not None:
-            websocket_config = TEMPLATE_WEBSOCKET_CONFIG.format(
-                hostname=websocket_hostname,
-                websocket_port=websocket_port,
+            extra_ports += TEMPLATE_WEBSOCKET_PORT.format(
+                hostname=websocket_hostname, websocket_port=websocket_port
+            )
+
+        bouncer_features = ""
+        if self.test_config.bouncer:
+            bouncer_features = TEMPLATE_BOUNCER_FEATURES
+
+        services_config = ""
+        services_features = ""
+        services_port = None
+        if run_services:
+            (_, services_port) = self.get_hostname_and_port()
+            self.nickserv = getattr(
+                self.services_controller_class, "nickserv", self.nickserv
+            )
+            services_config = TEMPLATE_SERVICES_CONFIG.format(
+                hostname=hostname,
+                services_port=services_port,
+                services_ip=getattr(
+                    self.services_controller_class, "bind_address", "127.0.0.1"
+                ),
+            )
+            services_features = TEMPLATE_SERVICES_FEATURES.format(
+                nickserv=self.nickserv,
+                sasl_mechanisms=",".join(
+                    getattr(
+                        self.services_controller_class,
+                        "sasl_mechanisms",
+                        sorted(self.supported_sasl_mechanisms),
+                    )
+                ),
             )
 
         with self.open_file("server.conf") as fd:
@@ -206,8 +302,13 @@ class NefariousController(BaseServerController, DirectoryBasedController):
                     port=port,
                     password_field=password_field,
                     pidfile=pidfile,
-                    ssl_config=ssl_config + websocket_config,
+                    extra_ports=extra_ports,
+                    ssl_pem=ssl_pem,
                     ssl_features=ssl_features,
+                    services_config=services_config,
+                    services_features=services_features,
+                    bouncer_features=bouncer_features,
+                    chathistory_db=self.directory / "history",
                 )
             )
 
@@ -228,6 +329,18 @@ class NefariousController(BaseServerController, DirectoryBasedController):
                 "DEBUG",
             ],
         )
+
+        if run_services:
+            assert services_port is not None
+            self.wait_for_port()
+            self.services_controller = self.services_controller_class(
+                self.test_config, self
+            )
+            self.services_controller.run(
+                protocol="nefarious",
+                server_hostname=hostname,
+                server_port=services_port,
+            )
 
 
 def get_irctest_controller_class() -> Type[NefariousController]:

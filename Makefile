@@ -69,8 +69,13 @@ NEFARIOUS_MARKERS := \
 	and not deprecated \
 	and not strict \
 	$(EXTRA_MARKERS)
+# testChathistoryTagmsg: Nefarious replays stored TAGMSGs (reactions, replies)
+# in CHATHISTORY even without draft/event-playback, a deliberate divergence.
+# testRedactDirectMessage: Nefarious does not support redacting private
+# messages and refuses with FAIL REDACT INVALID_TARGET, which the spec allows.
 NEFARIOUS_SELECTORS := \
-	(foo or not foo) \
+	not testChathistoryTagmsg \
+	and not testRedactDirectMessage \
 	$(EXTRA_SELECTORS)
 
 SNIRCD_MARKERS := \
@@ -272,6 +277,17 @@ nefarious:
 		--controller=irctest.controllers.nefarious \
 		-m 'not services and $(NEFARIOUS_MARKERS)' \
 		-k '$(NEFARIOUS_SELECTORS)' \
+		-n 4
+
+# Nefarious registers accounts (draft/account-registration) through Keycloak,
+# not services, so those tests do not apply with X3.
+.PHONY: nefarious-x3
+nefarious-x3:
+	$(PYTEST) $(PYTEST_ARGS) \
+		--controller=irctest.controllers.nefarious \
+		--services-controller=irctest.controllers.x3_services \
+		-m 'services and $(NEFARIOUS_MARKERS)' \
+		-k 'not account_registration and $(NEFARIOUS_SELECTORS)' \
 		-n 4
 
 .PHONY: snircd

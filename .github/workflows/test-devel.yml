@@ -550,6 +550,7 @@ jobs:
     - test-ircu2
     - test-limnoria
     - test-nefarious
+    - test-nefarious-x3
     - test-ngircd
     - test-ngircd-anope
     - test-ngircd-atheme
@@ -972,9 +973,13 @@ jobs:
       uses: actions/checkout@v7
       with:
         path: nefarious
-        ref: master
+        ref: ircv3.2-upgrade
         repository: evilnet/nefarious2
         submodules: ''
+    - &id001
+      name: Install system dependencies
+      run: sudo apt-get install --no-install-recommends faketime librocksdb-dev libzstd-dev
+        libcurl4-openssl-dev libjansson-dev libgit2-dev
     - name: Build nefarious
       run: |
         ./configure --prefix=$HOME/.local/ --enable-debug
@@ -1001,6 +1006,65 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: pytest-results_nefarious_devel
+        path: pytest.xml
+  test-nefarious-x3:
+    needs: []
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v7
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+    - name: Checkout nefarious
+      uses: actions/checkout@v7
+      with:
+        path: nefarious
+        ref: ircv3.2-upgrade
+        repository: evilnet/nefarious2
+        submodules: ''
+    - *id001
+    - name: Build nefarious
+      run: |
+        ./configure --prefix=$HOME/.local/ --enable-debug
+        make
+        echo -e "N\n\n\n\n\n\n\n\n" | make install
+        cp $GITHUB_WORKSPACE/data/nefarious/* $HOME/.local/lib
+      working-directory: nefarious
+    - name: Checkout X3
+      uses: actions/checkout@v7
+      with:
+        path: x3
+        ref: master
+        repository: evilnet/x3
+        submodules: ''
+    - name: Install X3 build dependencies
+      run: sudo apt-get install --no-install-recommends flex byacc libtre-dev
+    - name: Build X3
+      run: |
+        ./configure --prefix=$HOME/.local/
+        make
+        make install
+      working-directory: x3
+    - name: Install system dependencies
+      run: sudo apt-get install faketime
+    - name: Install irctest dependencies
+      run: |-
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt pytest-xdist pytest-timeout
+    - env:
+        IRCTEST_DEBUG_LOGS: ${{ runner.debug }}
+        PYTEST_ARGS: --junit-xml pytest.xml --timeout 300
+      name: Test with pytest
+      run: |-
+        export PATH=~/.local/bin:$PATH
+        make nefarious-x3
+      timeout-minutes: 30
+    - if: always()
+      name: Publish results
+      uses: actions/upload-artifact@v7
+      with:
+        name: pytest-results_nefarious-x3_devel
         path: pytest.xml
   test-ngircd:
     needs:
