@@ -17,7 +17,7 @@ from irctest.client_mock import ClientMock
 from irctest.exceptions import NoMessageException
 from irctest.irc_utils import message_parser
 from irctest.numerics import ERR_INPUTTOOLONG
-from irctest.patma import ANYSTR, StrRe
+from irctest.patma import ANYSTR, Either, StrRe
 from irctest.specifications import OptionalBehaviors
 
 
@@ -189,6 +189,7 @@ class WebsocketTestCase(cases.BaseServerTestCase):
         self.assertEqual(self.clients[2].conn.subprotocol, expected_subprotocol)
 
         self.sendLine(2, "PRIVMSG nonweb :hello")
+        self.getMessages(2)  # synchronize
         self.assertMessageMatch(
             self.getMessage(1),
             command="PRIVMSG",
@@ -228,7 +229,9 @@ class WebsocketTestCase(cases.BaseServerTestCase):
                 fail_msg="Server rejected non-UTF8 message but does not advertise UTF8ONLY",
             )
             self.assertMessageMatch(
-                msg, command="FAIL", params=["PRIVMSG", "INVALID_UTF8", ANYSTR]
+                msg,
+                command="FAIL",
+                params=[Either("*", "PRIVMSG"), "INVALID_UTF8", ANYSTR],
             )
             raise runner.OptionalBehaviorNotSupported(
                 OptionalBehaviors.NON_UTF8_MESSAGE
@@ -281,7 +284,9 @@ class WebsocketTestCase(cases.BaseServerTestCase):
                 fail_msg="Server rejected non-UTF8 message but does not advertise UTF8ONLY",
             )
             self.assertMessageMatch(
-                msg, command="FAIL", params=["PRIVMSG", "INVALID_UTF8", ANYSTR]
+                msg,
+                command="FAIL",
+                params=[Either("*", "PRIVMSG"), "INVALID_UTF8", ANYSTR],
             )
             raise runner.OptionalBehaviorNotSupported(
                 OptionalBehaviors.NON_UTF8_MESSAGE
@@ -311,6 +316,7 @@ class WebsocketTestCase(cases.BaseServerTestCase):
         )
 
         self.sendLine(2, "PRIVMSG nonweb :hello")
+        self.getMessages(2)  # synchronize
         msg = self.getMessage(1)
         self.assertMessageMatch(
             msg,

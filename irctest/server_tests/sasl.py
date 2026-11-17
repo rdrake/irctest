@@ -4,6 +4,7 @@ import time
 import pytest
 
 from irctest import cases, runner, scram
+from irctest.exceptions import ConnectionClosed
 from irctest.numerics import (
     ERR_ALREADYREGISTERED,
     ERR_INPUTTOOLONG,
@@ -60,7 +61,7 @@ class SaslTestCase(cases.BaseServerTestCase):
             "replied with “AUTHENTICATE +”, but instead sent: {msg}",
         )
         self.sendLine(1, "AUTHENTICATE amlsbGVzAGppbGxlcwBzZXNhbWU=")
-        m = self.getRegistrationMessage(1)
+        m = self.getRegistrationMessage(1, ignore_cap_new=True)
         self.assertMessageMatch(
             m,
             command=RPL_LOGGEDIN,
@@ -114,7 +115,7 @@ class SaslTestCase(cases.BaseServerTestCase):
             "replied with “AUTHENTICATE +”, but instead sent: {msg}",
         )
         self.sendLine(1, "AUTHENTICATE " + authstring)
-        m = self.getRegistrationMessage(1)
+        m = self.getRegistrationMessage(1, ignore_cap_new=True)
         self.assertMessageMatch(
             m,
             command=RPL_LOGGEDIN,
@@ -174,7 +175,7 @@ class SaslTestCase(cases.BaseServerTestCase):
             "replied with “AUTHENTICATE +”, but instead sent: {msg}",
         )
         self.sendLine(1, "AUTHENTICATE AGppbGxlcwBzZXNhbWU=")
-        m = self.getRegistrationMessage(1)
+        m = self.getRegistrationMessage(1, ignore_cap_new=True)
         self.assertMessageMatch(
             m,
             command=RPL_LOGGEDIN,
@@ -361,10 +362,54 @@ class SaslTestCase(cases.BaseServerTestCase):
             "expected 905 (ERR_SASLTOOLONG) or 417 (ERR_INPUTTOOLONG), but got: {msg}",
         )
 
+    @cases.mark_specifications("IRCv3")
+    @cases.skipUnlessHasMechanism("PLAIN")
+    def testPlainInfiniteMessages(self):
+        """Test an excessively large number of AUTHENTICATE messages, which force
+        the server to waste memory storing it"""
+        self.controller.registerUser(self, "foo", "sesame")
+
+        authstring = base64.b64encode(
+            b"\x00".join([b"foo", b"foo", ("x" * 400).encode()])
+        ).decode()
+
+        self.addClient()
+        self.sendLine(1, "CAP LS 302")
+        capabilities = self.getCapLs(1)
+        self.assertIn("sasl", capabilities)
+        self.requestCapabilities(1, ["sasl"], skip_if_cap_nak=False)
+        self.sendLine(1, "AUTHENTICATE PLAIN")
+        m = self.getRegistrationMessage(1)
+        self.assertMessageMatch(
+            m,
+            command="AUTHENTICATE",
+            params=["+"],
+        )
+        # Send first 400 bytes
+        self.sendLine(1, "AUTHENTICATE {}".format(authstring[0:400]))
+
+        # repeat nonsense
+        payload = base64.b64encode(("x" * 400).encode()).decode()[0:400]
+        try:
+            for _ in range(1000):
+                self.sendLine(1, "AUTHENTICATE {}".format(payload))
+
+            m = self.getRegistrationMessage(1)
+        except (ConnectionResetError, ConnectionClosed):
+            # acceptable, as long as we didn't crash the whole server
+            self.controller.check_is_alive()
+            return
+
+        self.assertMessageMatch(
+            m,
+            command=ERR_SASLFAIL,
+            fail_msg="Server did not complain about 400kB-long auth string: {msg}",
+        )
+
     def confirmSuccessfulAuth(self):
         # TODO: check username/etc in this as well, so we can apply it to other tests
-        m1 = self.getRegistrationMessage(1)
-        m2 = self.getRegistrationMessage(1)
+        m1 = self.getRegistrationMessage(1, ignore_cap_new=True)
+        m2 = self.getRegistrationMessage(1, ignore_cap_new=True)
         if m1.command == RPL_SASLSUCCESS and m2.command == RPL_LOGGEDIN:
             # Seems to happen only for Solanum with Anope.
             # Order is not guaranteed by the spec so this is fine
@@ -859,7 +904,7 @@ class SaslTestCase(cases.BaseServerTestCase):
         self.sendLine(1, "NICK foo")
         self.sendLine(1, "USER foo * * :Test")
         self.sendLine(1, "AUTHENTICATE amlsbGVzAGppbGxlcwBzZXNhbWU=")
-        m = self.getRegistrationMessage(1)
+        m = self.getRegistrationMessage(1, ignore_cap_new=True)
         self.assertMessageMatch(
             m,
             command=RPL_LOGGEDIN,

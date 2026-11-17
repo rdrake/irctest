@@ -42,6 +42,7 @@ class Capabilities(enum.Enum):
     MESSAGE_REDACTION = "draft/message-redaction"
     MESSAGE_TAGS = "message-tags"
     MULTILINE = "draft/multiline"
+    READ_MARKER = "draft/read-marker"
     MULTI_PREFIX = "multi-prefix"
     SERVER_TIME = "server-time"
     SETNAME = "setname"
@@ -111,9 +112,9 @@ class OptionalBehaviors(enum.Enum):
     with the +l channel mode.
     """
 
-    METADATA_BEFORE_CONNECT = "draft/metadata-2=before-connect"
+    METADATA_BEFORE_CONNECT = "draft/metadata-3=before-connect"
     """
-    Optional feature in draft/metadata-2 allowing clients to set metadata
+    Optional feature in draft/metadata-3 allowing clients to set metadata
     on themselves before completing connection registration.
     """
 
