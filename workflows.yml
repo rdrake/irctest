@@ -222,12 +222,16 @@ software:
     nefarious:
         name: nefarious
         repository: evilnet/nefarious2
+        # The IRCv3 branch, which the controller describes; master predates it.
         refs:
-            stable: "985704168ecada12d9e53b46df6087ef9d9fb40b"
+            stable: "426b280834b16769f311b727b36fd9166852467f"
             release: null
-            devel: "master"
+            devel: "ircv3.2-upgrade"
             devel_release: null
         path: nefarious
+        pre_deps:
+            - name: "Install system dependencies"
+              run: "sudo apt-get install --no-install-recommends faketime librocksdb-dev libzstd-dev libcurl4-openssl-dev libjansson-dev libgit2-dev"
         separate_build_job: false
         build_script: |
             ./configure --prefix=$HOME/.local/ --enable-debug
@@ -445,6 +449,25 @@ software:
             IRCTEST_WP_ZIP_PATH: ${{ github.workspace }}/Dlk-Services/wordpress-latest.zip
 
 
+    x3:
+        name: X3
+        repository: evilnet/x3
+        refs:
+            stable: "47b76b47dd2f16d65a51d3a6751f1a24b0da947a"
+            release: null
+            devel: "master"
+            devel_release: null
+        path: x3
+        pre_deps:
+            - name: "Install X3 build dependencies"
+              run: "sudo apt-get install --no-install-recommends flex byacc libtre-dev"
+        separate_build_job: false
+        build_script: |
+            ./configure --prefix=$HOME/.local/
+            make
+            make install
+
+
     #############################
     # Clients:
 
@@ -556,6 +579,9 @@ tests:
 
     nefarious:
         software: [nefarious]
+
+    nefarious-x3:
+        software: [nefarious, x3]
 
     sable:
         software: [sable]
