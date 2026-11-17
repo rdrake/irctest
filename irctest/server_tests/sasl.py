@@ -944,11 +944,11 @@ class SaslTestCase(cases.BaseServerTestCase):
         commands = {m.command for m in messages}
         # Should either get 906 or just complete registration
         # Check that we got either 906 or welcome (001)
-        if ERR_SASLABORTED not in commands and "001" not in commands:
-            self.fail(
-                "Expected either 906 (ERR_SASLABORTED) or 001 (RPL_WELCOME), "
-                f"got: {[m.command for m in messages]}"
-            )
+        self.assertTrue(
+            ERR_SASLABORTED in commands or "001" in commands,
+            "Expected either 906 (ERR_SASLABORTED) or 001 (RPL_WELCOME), "
+            f"got: {[m.command for m in messages]}",
+        )
 
     @cases.mark_specifications("IRCv3")
     @cases.skipUnlessHasMechanism("PLAIN")
