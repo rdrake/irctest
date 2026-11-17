@@ -274,6 +274,17 @@ nefarious:
 		-k '$(NEFARIOUS_SELECTORS)' \
 		-n 4
 
+# Nefarious registers accounts (draft/account-registration) through Keycloak,
+# not services, so those tests do not apply with X3.
+.PHONY: nefarious-x3
+nefarious-x3:
+	$(PYTEST) $(PYTEST_ARGS) \
+		--controller=irctest.controllers.nefarious \
+		--services-controller=irctest.controllers.x3_services \
+		-m 'services and $(NEFARIOUS_MARKERS)' \
+		-k 'not account_registration and $(NEFARIOUS_SELECTORS)' \
+		-n 4
+
 .PHONY: snircd
 snircd:
 	$(PYTEST) $(PYTEST_ARGS) \
